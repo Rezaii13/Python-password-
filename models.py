@@ -1,5 +1,6 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, create_engine
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -7,88 +8,82 @@ Base = declarative_base()
 
 
 class User(Base):
-    """
-    User model for the authentication system.
-    
-    Attributes:
-        id (int): Primary key for the user
-        username (str): Unique username for login
-        email (str): Unique email address
-        password_hash (str): Hashed password for security
-        first_name (str): User's first name
-        last_name (str): User's last name
-        is_active (bool): Flag to indicate if user account is active
-        created_at (datetime): Timestamp of user creation
-        updated_at (datetime): Timestamp of last update
-    """
-    
+    """User model for authentication"""
     __tablename__ = 'users'
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    id = Column(Integer, primary_key=True)
     username = Column(String(80), unique=True, nullable=False, index=True)
     email = Column(String(120), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
-    first_name = Column(String(120), nullable=True)
-    last_name = Column(String(120), nullable=True)
-    is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-    
-    def set_password(self, password):
-        """
-        Hash and set the user's password.
-        
-        Args:
-            password (str): The plain text password to hash
-        """
-        self.password_hash = generate_password_hash(password)
-    
-    def check_password(self, password):
-        """
-        Verify if the provided password matches the stored hash.
-        
-        Args:
-            password (str): The plain text password to verify
-            
-        Returns:
-            bool: True if password is correct, False otherwise
-        """
-        return check_password_hash(self.password_hash, password)
-    
-    def get_full_name(self):
-        """
-        Get the user's full name.
-        
-        Returns:
-            str: The user's full name or username if names not provided
-        """
-        if self.first_name and self.last_name:
-            return f"{self.first_name} {self.last_name}"
-        elif self.first_name:
-            return self.first_name
-        elif self.last_name:
-            return self.last_name
-        return self.username
-    
+    first_name = Column(String(50))
+    last_name = Column(String(50))
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
     def __repr__(self):
-        """Return a string representation of the User object."""
-        return f"<User(id={self.id}, username='{self.username}', email='{self.email}')>"
-    
-    def to_dict(self):
-        """
-        Convert user object to dictionary (useful for API responses).
-        
-        Returns:
-            dict: Dictionary representation of the user
-        """
-        return {
-            'id': self.id,
-            'username': self.username,
-            'email': self.email,
-            'first_name': self.first_name,
-            'last_name': self.last_name,
-            'full_name': self.get_full_name(),
-            'is_active': self.is_active,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
-        }
+        return f'<User {self.username}>'
+
+    def set_password(self, password):
+        """Hash and set the user password"""
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        """Verify the password against the stored hash"""
+        return check_password_hash(self.password_hash, password)
+
+
+class AuthenticationLog(Base):
+    """Authentication log model to track login attempts"""
+    __tablename__ = 'authentication_logs'
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, nullable=True)
+    username = Column(String(80), nullable=False)
+    attempt_type = Column(String(20), nullable=False)  # 'login', 'logout', 'failed_login'
+    success = Column(Boolean, default=False)
+    ip_address = Column(String(45))
+    user_agent = Column(String(255))
+    timestamp = Column(DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<AuthenticationLog {self.username} - {self.attempt_type} at {self.timestamp}>'
+
+
+class Session(Base):
+    """Session model for user session management"""
+    __tablename__ = 'sessions'
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    token = Column(String(255), unique=True, nullable=False, index=True)
+    ip_address = Column(String(45))
+    user_agent = Column(String(255))
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    last_activity = Column(DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<Session user_id={self.user_id} - active={self.is_active}>'
+
+
+# Database configuration
+DATABASE_URL = 'sqlite:///./password_manager.db'  # Change to your database URL
+
+
+def get_db_engine(database_url=DATABASE_URL):
+    """Create and return database engine"""
+    return create_engine(database_url, echo=False)
+
+
+def get_session_factory(database_url=DATABASE_URL):
+    """Create and return session factory"""
+    engine = get_db_engine(database_url)
+    return sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+def init_db(database_url=DATABASE_URL):
+    """Initialize database tables"""
+    engine = get_db_engine(database_url)
+    Base.metadata.create_all(bind=engine)
